@@ -24,12 +24,23 @@ class PaymentController extends Controller
         $profile = Auth::user()->studentProfile;
         $payments = $profile->payments()->with('feeStructure')->latest()->get();
 
-        $application = $profile->applications()->where('status', 'approved')->first();
-        $fees = $application
-            ? FeeStructure::where('programme_id', $application->programme_id)
-                ->where('intake_id', $application->intake_id)
-                ->get()
-            : collect();
+        $approvedApp = $profile->applications()->where('status', 'approved')->first();
+        $pendingApp = $profile->applications()->where('status', 'pending_fee')->first();
+        
+        $fees = collect();
+
+        if ($approvedApp) {
+            $fees = $fees->merge(FeeStructure::where('programme_id', $approvedApp->programme_id)
+                ->where('intake_id', $approvedApp->intake_id)
+                ->get());
+        }
+
+        if ($pendingApp) {
+            $fees = $fees->merge(FeeStructure::where('programme_id', $pendingApp->programme_id)
+                ->where('intake_id', $pendingApp->intake_id)
+                ->where('fee_type', 'application')
+                ->get());
+        }
 
         $activeMethods = \App\Models\PaymentMethod::where('is_active', true)->get();
 
