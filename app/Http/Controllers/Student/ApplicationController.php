@@ -129,12 +129,32 @@ class ApplicationController extends Controller
             return redirect()->route('student.applications.index')->with('error', $eligibility['message']);
         }
 
-        // Check if an application fee is required
-        $appFee = FeeStructure::where('programme_id', $data['programme_id'])
+        // Look for specific programme fee first
+        $appFee = FeeStructure::where('programme_id', $programme->id)
             ->where('intake_id', $data['intake_id'])
             ->where('fee_type', 'application')
             ->where('is_mandatory', true)
             ->first();
+
+        // If no specific fee, look for an award_level fee
+        if (!$appFee) {
+            $appFee = FeeStructure::whereNull('programme_id')
+                ->where('award_level', $programme->award_level)
+                ->where('intake_id', $data['intake_id'])
+                ->where('fee_type', 'application')
+                ->where('is_mandatory', true)
+                ->first();
+        }
+
+        // If still no fee, look for a universal fee
+        if (!$appFee) {
+            $appFee = FeeStructure::whereNull('programme_id')
+                ->whereNull('award_level')
+                ->where('intake_id', $data['intake_id'])
+                ->where('fee_type', 'application')
+                ->where('is_mandatory', true)
+                ->first();
+        }
 
         $hasPaid = false;
         if ($appFee) {
