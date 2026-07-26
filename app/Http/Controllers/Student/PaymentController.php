@@ -104,7 +104,7 @@ class PaymentController extends Controller
         $data = $request->validate([
             'fee_structure_id' => ['required', 'exists:fee_structures,id'],
             'method' => ['required', \Illuminate\Validation\Rule::in($activeMethods)],
-            'phone' => ['required_if:method,mpesa', 'nullable', 'string', 'max:20'],
+            'phone' => ['required_if:method,mpesa', 'nullable', 'string', 'max:20', new \App\Rules\KenyanPhoneNumber],
             'bank_reference' => ['required_if:method,bank_transfer', 'nullable', 'string', 'max:100', 'unique:payments,bank_reference'],
             'receipt' => ['required_if:method,bank_transfer', 'nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'],
         ]);
