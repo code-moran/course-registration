@@ -47,6 +47,7 @@ Route::middleware(['auth', 'role:student'])->prefix('student')->name('student.')
     Route::post('/registrations', [RegistrationController::class, 'store'])->name('registrations.store');
     Route::get('/payments', [PaymentController::class, 'index'])->name('payments.index');
     Route::post('/payments/initiate', [PaymentController::class, 'initiate'])->name('payments.initiate');
+    Route::get('/payments/{payment}/confirm', [PaymentController::class, 'confirm'])->name('payments.confirm');
     Route::post('/payments/{payment}/status', [PaymentController::class, 'status'])->name('payments.status');
     Route::post('/payments/{payment}/cancel', [PaymentController::class, 'cancel'])->name('payments.cancel');
     Route::get('/payments/{payment}/receipt', [PaymentController::class, 'receipt'])->name('payments.receipt');
