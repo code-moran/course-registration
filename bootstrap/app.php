@@ -11,9 +11,16 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
-        // Trust reverse proxies (ngrok, Cloudflare, load balancers) so
-        // X-Forwarded-Proto is honored when generating absolute URLs.
-        $middleware->trustProxies(at: '*');
+        // Railway terminates TLS at the edge and forwards HTTP + X-Forwarded-*.
+        // Trusting proxies keeps request()->secure(), sessions, and CSRF aligned.
+        $middleware->trustProxies(
+            at: '*',
+            headers: \Illuminate\Http\Request::HEADER_X_FORWARDED_FOR
+                | \Illuminate\Http\Request::HEADER_X_FORWARDED_HOST
+                | \Illuminate\Http\Request::HEADER_X_FORWARDED_PORT
+                | \Illuminate\Http\Request::HEADER_X_FORWARDED_PROTO
+                | \Illuminate\Http\Request::HEADER_X_FORWARDED_AWS_ELB
+        );
 
         // Daraja calls these endpoints directly and cannot supply Laravel's
         // browser CSRF token.

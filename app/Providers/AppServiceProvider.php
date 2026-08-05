@@ -21,6 +21,11 @@ class AppServiceProvider extends ServiceProvider
 
     private function shouldForceHttps(): bool
     {
+        // Local artisan serve is HTTP-only; forcing https breaks form posts (419 CSRF).
+        if ($this->app->environment(['local', 'testing'])) {
+            return false;
+        }
+
         if (filter_var(config('app.force_https'), FILTER_VALIDATE_BOOLEAN)) {
             return true;
         }

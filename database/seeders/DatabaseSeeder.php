@@ -3,11 +3,14 @@
 namespace Database\Seeders;
 
 use App\Enums\UserRole;
+use App\Models\Campus;
 use App\Models\CourseUnit;
+use App\Models\DocumentRequirement;
 use App\Models\FeeStructure;
 use App\Models\Intake;
 use App\Models\Programme;
 use App\Models\Semester;
+use App\Models\SystemSetting;
 use App\Models\TimetableEntry;
 use App\Models\User;
 use Illuminate\Database\Seeder;
@@ -15,31 +18,29 @@ use Illuminate\Support\Facades\Hash;
 
 class DatabaseSeeder extends Seeder
 {
+    /**
+     * Idempotent: safe to re-run on a database that migrations (or an earlier
+     * seed) already populated.
+     */
     public function run(): void
     {
-        User::create([
-            'name' => 'System Administrator',
-            'email' => 'admin@ocrs.ac.ke',
-            'phone' => '254700000001',
-            'role' => UserRole::Admin,
-            'password' => Hash::make('password'),
-        ]);
+        $staff = [
+            ['name' => 'System Administrator', 'email' => 'admin@ocrs.ac.ke', 'phone' => '254700000001', 'role' => UserRole::Admin],
+            ['name' => 'Registrar Office', 'email' => 'registrar@ocrs.ac.ke', 'phone' => '254700000002', 'role' => UserRole::Registrar],
+            ['name' => 'Finance Office', 'email' => 'finance@ocrs.ac.ke', 'phone' => '254700000003', 'role' => UserRole::Finance],
+        ];
 
-        User::create([
-            'name' => 'Registrar Office',
-            'email' => 'registrar@ocrs.ac.ke',
-            'phone' => '254700000002',
-            'role' => UserRole::Registrar,
-            'password' => Hash::make('password'),
-        ]);
-
-        User::create([
-            'name' => 'Finance Office',
-            'email' => 'finance@ocrs.ac.ke',
-            'phone' => '254700000003',
-            'role' => UserRole::Finance,
-            'password' => Hash::make('password'),
-        ]);
+        foreach ($staff as $member) {
+            User::firstOrCreate(
+                ['email' => $member['email']],
+                [
+                    'name' => $member['name'],
+                    'phone' => $member['phone'],
+                    'role' => $member['role'],
+                    'password' => Hash::make('password'),
+                ]
+            );
+        }
 
         $programmes = [
             ['code' => 'BSC-CS', 'name' => 'BSc Computer Science', 'department' => 'Computing', 'award_level' => 'degree', 'duration_semesters' => 8, 'minimum_kcse_grade' => 7.00, 'cue_accreditation_ref' => 'CUE/REF/CS/2024'],
@@ -48,28 +49,34 @@ class DatabaseSeeder extends Seeder
         ];
 
         foreach ($programmes as $p) {
-            Programme::create($p + ['is_active' => true]);
+            Programme::updateOrCreate(
+                ['code' => $p['code']],
+                array_diff_key($p, ['code' => null]) + ['is_active' => true]
+            );
         }
 
-        $intake = Intake::create([
-            'name' => 'September 2026',
-            'academic_year' => '2026/2027',
-            'application_opens' => '2026-05-01',
-            'application_closes' => '2026-08-31',
-            'registration_opens' => '2026-09-01',
-            'registration_closes' => '2026-09-15',
-            'is_active' => true,
-        ]);
+        $intake = Intake::updateOrCreate(
+            ['name' => 'September 2026'],
+            [
+                'academic_year' => '2026/2027',
+                'application_opens' => '2026-05-01',
+                'application_closes' => '2026-08-31',
+                'registration_opens' => '2026-09-01',
+                'registration_closes' => '2026-09-15',
+                'is_active' => true,
+            ]
+        );
 
-        $semester = Semester::create([
-            'intake_id' => $intake->id,
-            'name' => 'Semester 1',
-            'sequence' => 1,
-            'registration_deadline' => '2026-09-15',
-            'starts_on' => '2026-09-20',
-            'ends_on' => '2027-01-15',
-            'is_active' => true,
-        ]);
+        $semester = Semester::updateOrCreate(
+            ['intake_id' => $intake->id, 'name' => 'Semester 1'],
+            [
+                'sequence' => 1,
+                'registration_deadline' => '2026-09-15',
+                'starts_on' => '2026-09-20',
+                'ends_on' => '2027-01-15',
+                'is_active' => true,
+            ]
+        );
 
         $units = [
             ['code' => 'CS101', 'name' => 'Introduction to Programming', 'credit_units' => 3, 'capacity' => 60, 'semester_level' => 1],
@@ -79,7 +86,10 @@ class DatabaseSeeder extends Seeder
         ];
 
         foreach ($units as $u) {
-            CourseUnit::create($u + ['is_active' => true]);
+            CourseUnit::updateOrCreate(
+                ['code' => $u['code']],
+                array_diff_key($u, ['code' => null]) + ['is_active' => true]
+            );
         }
 
         $cs = Programme::where('code', 'BSC-CS')->first();
@@ -92,39 +102,31 @@ class DatabaseSeeder extends Seeder
         $math101 = CourseUnit::where('code', 'MATH101')->first();
 
         // Attach semester-1 (and CS progression) units so every programme can register after enrollment
-        $cs->courseUnits()->attach([
+        $cs->courseUnits()->syncWithoutDetaching([
             $cs101->id => ['is_core' => true],
             $cs102->id => ['is_core' => true],
             $math101->id => ['is_core' => true],
         ]);
-        $bba->courseUnits()->attach([
+        $bba->courseUnits()->syncWithoutDetaching([
             $bus101->id => ['is_core' => true],
             $math101->id => ['is_core' => true],
         ]);
-        $dip->courseUnits()->attach([
+        $dip->courseUnits()->syncWithoutDetaching([
             $cs101->id => ['is_core' => true],
             $math101->id => ['is_core' => true],
         ]);
 
-        $cs102->prerequisites()->attach($cs101->id);
+        $cs102->prerequisites()->syncWithoutDetaching([$cs101->id]);
 
         foreach (Programme::all() as $programme) {
-            FeeStructure::create([
-                'programme_id' => $programme->id,
-                'intake_id' => $intake->id,
-                'fee_type' => 'application',
-                'description' => 'Application Fee',
-                'amount' => 2000,
-                'is_mandatory' => true,
-            ]);
-            FeeStructure::create([
-                'programme_id' => $programme->id,
-                'intake_id' => $intake->id,
-                'fee_type' => 'tuition',
-                'description' => 'Semester 1 Tuition',
-                'amount' => 85000,
-                'is_mandatory' => true,
-            ]);
+            FeeStructure::updateOrCreate(
+                ['programme_id' => $programme->id, 'intake_id' => $intake->id, 'fee_type' => 'application'],
+                ['description' => 'Application Fee', 'amount' => 2000, 'is_mandatory' => true]
+            );
+            FeeStructure::updateOrCreate(
+                ['programme_id' => $programme->id, 'intake_id' => $intake->id, 'fee_type' => 'tuition'],
+                ['description' => 'Semester 1 Tuition', 'amount' => 85000, 'is_mandatory' => true]
+            );
         }
 
         // Sample weekly slots for every linked semester-1 unit (and CS101 repeat tutorial)
@@ -137,18 +139,35 @@ class DatabaseSeeder extends Seeder
         ];
 
         foreach ($timetable as $slot) {
-            TimetableEntry::create($slot + ['semester_id' => $semester->id]);
+            TimetableEntry::updateOrCreate(
+                [
+                    'semester_id' => $semester->id,
+                    'course_unit_id' => $slot['course_unit_id'],
+                    'day_of_week' => $slot['day_of_week'],
+                    'starts_at' => $slot['starts_at'],
+                ],
+                ['ends_at' => $slot['ends_at'], 'venue' => $slot['venue'], 'lecturer' => $slot['lecturer']]
+            );
         }
 
-        \App\Models\Campus::create(['name' => 'Main Campus - Nairobi', 'code' => 'MC-NBI', 'location' => 'Nairobi CBD', 'is_active' => true]);
-        \App\Models\Campus::create(['name' => 'Mombasa City Campus', 'code' => 'MSA-CC', 'location' => 'Mombasa Island', 'is_active' => true]);
+        $campuses = [
+            ['code' => 'MC-NBI', 'name' => 'Main Campus - Nairobi', 'location' => 'Nairobi CBD'],
+            ['code' => 'MSA-CC', 'name' => 'Mombasa City Campus', 'location' => 'Mombasa Island'],
+        ];
+
+        foreach ($campuses as $campus) {
+            Campus::updateOrCreate(
+                ['code' => $campus['code']],
+                ['name' => $campus['name'], 'location' => $campus['location'], 'is_active' => true]
+            );
+        }
 
         $settings = [
             // General
             ['group' => 'general', 'key' => 'institution_name', 'value' => 'OCRS University', 'type' => 'string'],
             ['group' => 'general', 'key' => 'institution_code', 'value' => 'OCRS', 'type' => 'string'],
             ['group' => 'general', 'key' => 'maintenance_mode', 'value' => '0', 'type' => 'boolean'],
-            
+
             // Admissions
             ['group' => 'admission', 'key' => 'require_kcse_verification', 'value' => '1', 'type' => 'boolean'],
             ['group' => 'admission', 'key' => 'auto_generate_admission_number', 'value' => '1', 'type' => 'boolean'],
@@ -170,10 +189,14 @@ class DatabaseSeeder extends Seeder
         ];
 
         foreach ($settings as $setting) {
-            \App\Models\SystemSetting::create($setting);
+            SystemSetting::firstOrCreate(
+                ['key' => $setting['key']],
+                ['group' => $setting['group'], 'value' => $setting['value'], 'type' => $setting['type']]
+            );
         }
 
-        // Standard Kenyan direct-admission document checklist
+        // Standard Kenyan direct-admission document checklist.
+        // Also inserted by the 2026_07_24 migration, so keyed on the unique code.
         $documentRequirements = [
             [
                 'name' => 'KCSE Certificate / Result Slip',
@@ -197,7 +220,7 @@ class DatabaseSeeder extends Seeder
                 'max_size_kb' => 2048,
             ],
             [
-                'name' => 'Birth Certificate (alternative ID for applicants without National ID)',
+                'name' => 'Birth Certificate (required under 18)',
                 'code' => 'birth_certificate',
                 'is_required' => false,
                 'allowed_extensions' => 'pdf,jpg,jpeg,png',
@@ -213,7 +236,10 @@ class DatabaseSeeder extends Seeder
         ];
 
         foreach ($documentRequirements as $requirement) {
-            \App\Models\DocumentRequirement::create($requirement);
+            DocumentRequirement::updateOrCreate(
+                ['code' => $requirement['code']],
+                array_diff_key($requirement, ['code' => null])
+            );
         }
     }
 }
