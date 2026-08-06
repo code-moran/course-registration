@@ -1,0 +1,29 @@
+# GitHub Actions auto-deploy for course-registration
+# Pushes to master trigger the control-plane webhook.
+name: Deploy course-registration
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+
+concurrency:
+  group: im-deploy-course-registration
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger control-plane deploy
+        env:
+          CONTROL_PLANE_URL: ${{ secrets.CONTROL_PLANE_URL }}
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+        run: |
+          test -n "$CONTROL_PLANE_URL" || { echo "CONTROL_PLANE_URL secret missing" >&2; exit 1; }
+          test -n "$DEPLOY_TOKEN" || { echo "DEPLOY_TOKEN secret missing" >&2; exit 1; }
+          curl -fsS -X POST "$CONTROL_PLANE_URL/webhooks/deployments/course-registration" \
+            -H "content-type: application/json" \
+            -H "x-deploy-token: $DEPLOY_TOKEN" \
+            -d "{\"commitSha\":\"${{ github.sha }}\",\"version\":\"${{ github.sha }}\",\"message\":\"CI deploy from ${{ github.ref_name }}\""}
