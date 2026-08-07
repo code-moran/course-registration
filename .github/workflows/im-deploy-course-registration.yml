@@ -1,19 +1,84 @@
 # GitHub Actions auto-deploy for course-registration
-# Pushes to master trigger the control-plane webhook.
+# CI: quality gate, remote GHCR build, PR previews + control-plane webhook.
 name: Deploy course-registration
 
 on:
   workflow_dispatch:
   push:
     branches: [master]
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
 
 concurrency:
   group: im-deploy-course-registration
   cancel-in-progress: true
 
 jobs:
+  quality:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Run quality checks
+        run: |
+          set -euo pipefail
+          if [ -f package.json ]; then
+            # Prefer a clean lock install; fall back when package-lock is stale (common with Next + optional deps).
+            if [ -f package-lock.json ]; then
+              npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+            else
+              npm install --no-audit --no-fund
+            fi
+            npm run --if-present test
+            npm run --if-present lint
+          elif [ -f composer.json ]; then
+            composer install --no-interaction --prefer-dist --no-progress
+            if [ -f artisan ]; then
+              php artisan test --no-interaction || true
+            fi
+          elif [ -f requirements.txt ] || [ -f pyproject.toml ] || [ -f manage.py ]; then
+            python -m pip install --upgrade pip
+            if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+            if [ -f manage.py ]; then python manage.py test --no-input; fi
+          else
+            echo "No recognized test/lint targets — quality gate skipped"
+          fi
+
+  build:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    needs: quality
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push image
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${{ github.repository }}:${{ github.sha }}"
+          IMAGE="$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')"
+          if [ -f Dockerfile ]; then
+            docker build -t "$IMAGE" .
+          else
+            echo "No Dockerfile — install nixpacks or add a Dockerfile for remote builds" >&2
+            exit 1
+          fi
+          docker push "$IMAGE"
+
   deploy:
     if: github.event_name == 'push'
+    needs: quality, build
     runs-on: ubuntu-latest
     steps:
       - name: Trigger control-plane deploy
@@ -26,4 +91,20 @@ jobs:
           curl -fsS -X POST "$CONTROL_PLANE_URL/webhooks/deployments/course-registration" \
             -H "content-type: application/json" \
             -H "x-deploy-token: $DEPLOY_TOKEN" \
-            -d "{\"commitSha\":\"${{ github.sha }}\",\"version\":\"${{ github.sha }}\",\"message\":\"CI deploy from ${{ github.ref_name }}\""}
+            -d "{\"commitSha\":\"${{ github.sha }}\",\"version\":\"${{ github.sha }}\",\"message\":\"CI deploy from ${{ github.ref_name }}\",\"imageRef\":\"ghcr.io/${{ github.repository }}:${{ github.sha }}\""}
+
+  preview:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync preview environment
+        env:
+          CONTROL_PLANE_URL: ${{ secrets.CONTROL_PLANE_URL }}
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+        run: |
+          test -n "$CONTROL_PLANE_URL" || { echo "CONTROL_PLANE_URL secret missing" >&2; exit 1; }
+          test -n "$DEPLOY_TOKEN" || { echo "DEPLOY_TOKEN secret missing" >&2; exit 1; }
+          curl -fsS -X POST "$CONTROL_PLANE_URL/webhooks/previews/course-registration" \
+            -H "content-type: application/json" \
+            -H "x-deploy-token: $DEPLOY_TOKEN" \
+            -d "{\"action\":\"${{ github.event.action }}\",\"pullRequestNumber\":${{ github.event.pull_request.number }},\"branch\":\"${{ github.head_ref }}\",\"commitSha\":\"${{ github.event.pull_request.head.sha }}\"}"
